@@ -1,0 +1,24 @@
+{
+	"schemaVersion": 1,
+	"id": "windowscraft",
+	"version": "${version}",
+	"name": "WindowsCraft",
+	"description": "Mirrors Windows application windows into Minecraft.",
+	"authors": [],
+	"license": "UNLICENSED",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"dev.windowscraft.WindowsCraft"
+		],
+		"client": [
+			"dev.windowscraft.client.WindowsCraftClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.1.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

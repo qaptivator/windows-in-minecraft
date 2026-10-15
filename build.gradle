@@ -1,0 +1,91 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+repositories {
+	// Loom adds Mojang, Fabric and Maven Central automatically.
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"windowscraft" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+
+	runs {
+		client {
+			// Java 25 prints warnings for restricted FFM calls unless this is set.
+			vmArgs '--enable-native-access=ALL-UNNAMED'
+			// Window to mirror: case-insensitive substring of the window title.
+			property('windowscraft.target', 'Notepad')
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+// ---------------------------------------------------------------------------
+// Native build: CMake -> windowscraft_native.dll -> bundled into the client
+// resources under natives/windows-x64/ so the mod jar is self-contained.
+// ---------------------------------------------------------------------------
+
+def nativeSourceDir = file('native')
+def nativeOutputDir = layout.buildDirectory.dir('generated/windowscraft-natives')
+
+tasks.register('configureNative', Exec) {
+	group = 'build native'
+	description = 'Configures the CMake project in native/'
+	workingDir = nativeSourceDir
+	// Pin the Visual Studio generator. Without -G, CMake may pick Ninja from PATH
+	// (e.g. MinGW), which rejects -A x64 and cannot find MSVC.
+	commandLine 'cmake', '-S', '.', '-B', 'build', '-G', 'Visual Studio 17 2022', '-A', 'x64'
+}
+
+tasks.register('buildNative', Exec) {
+	group = 'build native'
+	description = 'Builds windowscraft_native.dll (Release)'
+	dependsOn 'configureNative'
+	workingDir = nativeSourceDir
+	commandLine 'cmake', '--build', 'build', '--config', 'Release', '--parallel'
+}
+
+tasks.register('copyNativeDll', Copy) {
+	group = 'build native'
+	description = 'Copies the native DLL into the client resources'
+	dependsOn 'buildNative'
+	from file('native/build/Release/windowscraft_native.dll')
+	into nativeOutputDir.map { it.dir('natives/windows-x64') }
+}
+
+sourceSets.client.resources.srcDir(nativeOutputDir)
+
+tasks.named('processClientResources') {
+	dependsOn 'copyNativeDll'
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+processResources {
+	def version = project.version
+	inputs.property 'version', version
+
+	filesMatching('fabric.mod.json') {
+		expand 'version': version
+	}
+}

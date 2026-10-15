@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+bin/
+run/
+
+# C++ / CMake Build Outputs
+build/
+cmake-build-*/
+*.dll
+*.lib
+*.exp
+*.obj
+*.exe
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.iml
+.vs/
+
+# OS Specific
+.DS_Store
+Thumbs.db
