@@ -71,6 +71,13 @@ tasks.named('processClientResources') {
 	dependsOn 'copyNativeDll'
 }
 
+// sourcesJar reads the client resources, which include the generated DLL folder.
+// Declare the dependency explicitly and keep the binary out of the sources jar.
+tasks.matching { it.name == 'sourcesJar' }.configureEach {
+	dependsOn 'copyNativeDll'
+	exclude 'natives/**'
+}
+
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 25
 }

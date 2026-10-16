@@ -16,6 +16,7 @@ cmake-build-*/
 # IDEs & Editors
 .idea/
 .vscode/
+.dev/
 *.iml
 .vs/
 
