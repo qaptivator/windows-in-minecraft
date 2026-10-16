@@ -302,13 +302,54 @@ uint32_t CaptureSession::Height() const {
 	return m_impl->height;
 }
 
-size_t CaptureSession::CopyRgba(uint8_t *dst, size_t capacity) const {
+size_t CaptureSession::CopyRgbaScaled(uint8_t *dst, size_t capacity, uint32_t dstWidth, uint32_t dstHeight) const {
 	const auto &m = *m_impl;
-	const size_t bytes = static_cast<size_t>(m.width) * m.height * 4;
-	if (!dst || m.rgba.empty() || capacity < bytes) {
+	if (!dst || m.rgba.empty() || m.width == 0 || m.height == 0 || dstWidth == 0 || dstHeight == 0) {
 		return 0;
 	}
-	std::memcpy(dst, m.rgba.data(), bytes);
+
+	const size_t bytes = static_cast<size_t>(dstWidth) * dstHeight * 4;
+	if (capacity < bytes) {
+		return 0;
+	}
+
+	// Each destination pixel averages the block of source pixels it covers.
+	// Blocks are at least one source pixel wide, so upscaling still samples something.
+	for (uint32_t dy = 0; dy < dstHeight; ++dy) {
+		uint32_t sy0 = static_cast<uint32_t>(static_cast<uint64_t>(dy) * m.height / dstHeight);
+		uint32_t sy1 = static_cast<uint32_t>(static_cast<uint64_t>(dy + 1) * m.height / dstHeight);
+		if (sy1 <= sy0) {
+			sy1 = sy0 + 1;
+		}
+
+		for (uint32_t dx = 0; dx < dstWidth; ++dx) {
+			uint32_t sx0 = static_cast<uint32_t>(static_cast<uint64_t>(dx) * m.width / dstWidth);
+			uint32_t sx1 = static_cast<uint32_t>(static_cast<uint64_t>(dx + 1) * m.width / dstWidth);
+			if (sx1 <= sx0) {
+				sx1 = sx0 + 1;
+			}
+
+			uint64_t sum[4] = {0, 0, 0, 0};
+			uint64_t count = 0;
+			for (uint32_t sy = sy0; sy < sy1; ++sy) {
+				const uint8_t *row = m.rgba.data() + static_cast<size_t>(sy) * m.width * 4;
+				for (uint32_t sx = sx0; sx < sx1; ++sx) {
+					const uint8_t *px = row + static_cast<size_t>(sx) * 4;
+					sum[0] += px[0];
+					sum[1] += px[1];
+					sum[2] += px[2];
+					sum[3] += px[3];
+					++count;
+				}
+			}
+
+			uint8_t *out = dst + (static_cast<size_t>(dy) * dstWidth + dx) * 4;
+			for (int channel = 0; channel < 4; ++channel) {
+				out[channel] = static_cast<uint8_t>(sum[channel] / count);
+			}
+		}
+	}
+
 	return bytes;
 }
 

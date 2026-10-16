@@ -36,9 +36,10 @@ public:
 	uint32_t Width() const;
 	uint32_t Height() const;
 
-	// Copies the last frame as RGBA8 (bytes R,G,B,A per pixel) into dst.
-	// Returns bytes written, or 0 if there is no frame or capacity is too small.
-	size_t CopyRgba(uint8_t *dst, size_t capacity) const;
+	// Box-filters the last frame down to dstWidth x dstHeight and writes RGBA8
+	// (bytes R,G,B,A per pixel) into dst. Returns bytes written, or 0 if there is
+	// no frame or capacity is too small. Works for any size, including upscaling.
+	size_t CopyRgbaScaled(uint8_t *dst, size_t capacity, uint32_t dstWidth, uint32_t dstHeight) const;
 
 	HWND Window() const;
 

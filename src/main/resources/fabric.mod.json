@@ -7,6 +7,12 @@
 	"authors": [],
 	"license": "UNLICENSED",
 	"environment": "client",
+	"mixins": [
+		{
+			"config": "windowscraft.client.mixins.json",
+			"environment": "client"
+		}
+	],
 	"entrypoints": {
 		"main": [
 			"dev.windowscraft.WindowsCraft"

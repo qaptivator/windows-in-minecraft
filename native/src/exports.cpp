@@ -64,12 +64,13 @@ WC_EXPORT int32_t wc_get_size(void *session, int32_t *width, int32_t *height) {
 	return 1;
 }
 
-// (session, uint8* dst, uint64 capacity) -> bytes written (0 on failure)
-WC_EXPORT int64_t wc_copy_rgba(void *session, uint8_t *dst, uint64_t capacity) {
-	if (!session) {
+// (session, uint8* dst, uint64 capacity, int32 dst_width, int32 dst_height) -> bytes written (0 on failure)
+WC_EXPORT int64_t wc_copy_rgba_scaled(void *session, uint8_t *dst, uint64_t capacity, int32_t dst_width, int32_t dst_height) {
+	if (!session || dst_width <= 0 || dst_height <= 0) {
 		return 0;
 	}
-	return static_cast<int64_t>(AsSession(session)->CopyRgba(dst, static_cast<size_t>(capacity)));
+	return static_cast<int64_t>(AsSession(session)->CopyRgbaScaled(
+			dst, static_cast<size_t>(capacity), static_cast<uint32_t>(dst_width), static_cast<uint32_t>(dst_height)));
 }
 
 // (HWND, int32 x, int32 y) -> 1 on success

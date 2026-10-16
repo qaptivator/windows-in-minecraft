@@ -1,105 +1,53 @@
 package dev.windowscraft.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.windowscraft.WindowsCraft;
-import dev.windowscraft.client.capture.NativeCapture;
-import dev.windowscraft.client.capture.WindowCapture;
-import dev.windowscraft.client.render.CaptureTexture;
+import dev.windowscraft.client.gui.AppLauncherScreen;
+import dev.windowscraft.client.window.WindowManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
-import net.minecraft.client.DeltaTracker;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.renderer.RenderPipelines;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.lwjgl.glfw.GLFW;
 
 /**
- * Client entrypoint. Draws the mirrored window as a HUD quad.
- * This is a placeholder for the in-world quad, which comes next.
+ * Client entrypoint. Wires keybinds, render events and cleanup.
+ *
+ * V opens the launcher. X closes the window under the crosshair.
  */
 public final class WindowsCraftClient implements ClientModInitializer {
-	private static final Logger LOGGER = LoggerFactory.getLogger(WindowsCraft.MOD_ID + "/client");
-	private static final String TARGET_PROPERTY = "windowscraft.target";
-	private static final String DEFAULT_TARGET = "Notepad";
-	private static final long RETRY_DELAY_MS = 2000L;
-	private static final int DISPLAY_WIDTH = 640;
-	private static final int DISPLAY_X = 10;
-	private static final int DISPLAY_Y = 10;
-
-	private static final Identifier HUD_ELEMENT = Identifier.fromNamespaceAndPath(WindowsCraft.MOD_ID, "window_quad");
-
-	private static CaptureTexture texture;
-	private static WindowCapture capture;
-	private static boolean fatalError;
-	private static long nextAttemptMs;
+	private static KeyMapping launcherKey;
+	private static KeyMapping closeKey;
 
 	@Override
 	public void onInitializeClient() {
-		HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, HUD_ELEMENT, WindowsCraftClient::extract);
-		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> shutdown());
+		KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(WindowsCraft.MOD_ID, "controls"));
+		launcherKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key." + WindowsCraft.MOD_ID + ".launcher", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, category));
+		closeKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key." + WindowsCraft.MOD_ID + ".close", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_X, category));
+
+		ClientTickEvents.END_CLIENT_TICK.register(WindowsCraftClient::onClientTick);
+		LevelRenderEvents.END_EXTRACTION.register((context) -> WindowManager.get().refresh());
+		LevelRenderEvents.COLLECT_SUBMITS.register((context) -> WindowManager.get().submit(context));
+		ClientPlayConnectionEvents.DISCONNECT.register((listener, minecraft) -> WindowManager.get().clear());
+		ClientLifecycleEvents.CLIENT_STOPPING.register((client) -> WindowManager.get().clear());
 	}
 
-	private static void extract(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
-		if (!ensureCapture()) {
-			return;
-		}
-
-		capture.updateTexture(texture);
-
-		int width = texture.width();
-		int height = texture.height();
-		if (width == 0 || height == 0) {
-			return;
-		}
-
-		int displayHeight = DISPLAY_WIDTH * height / width;
-		graphics.blit(RenderPipelines.GUI_TEXTURED, texture.id(), DISPLAY_X, DISPLAY_Y, 0, 0, DISPLAY_WIDTH, displayHeight, width, height);
-	}
-
-	/** Lazily loads the native library and opens the target window. Retries every few seconds. */
-	private static boolean ensureCapture() {
-		if (capture != null) {
-			return true;
-		}
-		if (fatalError || System.currentTimeMillis() < nextAttemptMs) {
-			return false;
-		}
-
-		try {
-			NativeCapture.load();
-			if (!NativeCapture.init()) {
-				throw new IllegalStateException("wc_init returned failure, see native logs");
+	private static void onClientTick(Minecraft minecraft) {
+		while (launcherKey.consumeClick()) {
+			if (minecraft.player != null && minecraft.screen == null) {
+				minecraft.setScreen(new AppLauncherScreen());
 			}
+		}
 
-			String target = System.getProperty(TARGET_PROPERTY, DEFAULT_TARGET);
-			capture = WindowCapture.findByTitle(target).orElse(null);
-			if (capture == null) {
-				LOGGER.info("No visible window title contains '{}', retrying", target);
-				nextAttemptMs = System.currentTimeMillis() + RETRY_DELAY_MS;
-				return false;
+		while (closeKey.consumeClick()) {
+			if (minecraft.player != null && minecraft.screen == null) {
+				WindowManager.get().closeHovered();
 			}
-
-			texture = new CaptureTexture();
-			LOGGER.info("Capturing window matching '{}'", target);
-			return true;
-		} catch (Throwable t) {
-			fatalError = true;
-			LOGGER.error("WindowsCraft capture disabled", t);
-			return false;
 		}
-	}
-
-	private static void shutdown() {
-		if (capture != null) {
-			capture.close();
-			capture = null;
-		}
-		if (texture != null) {
-			texture.close();
-			texture = null;
-		}
-		NativeCapture.shutdown();
 	}
 }

@@ -18,10 +18,8 @@ loom {
 
 	runs {
 		client {
-			// Java 25 prints warnings for restricted FFM calls unless this is set.
-			vmArgs '--enable-native-access=ALL-UNNAMED'
-			// Window to mirror: case-insensitive substring of the window title.
-			property('windowscraft.target', 'Notepad')
+			// This is a debug world so we can test the mod quicker.
+			programArgs '--quickPlaySingleplayer', 'a simpler world'
 		}
 	}
 }
@@ -30,52 +28,6 @@ dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-}
-
-// ---------------------------------------------------------------------------
-// Native build: CMake -> windowscraft_native.dll -> bundled into the client
-// resources under natives/windows-x64/ so the mod jar is self-contained.
-// ---------------------------------------------------------------------------
-
-def nativeSourceDir = file('native')
-def nativeOutputDir = layout.buildDirectory.dir('generated/windowscraft-natives')
-
-tasks.register('configureNative', Exec) {
-	group = 'build native'
-	description = 'Configures the CMake project in native/'
-	workingDir = nativeSourceDir
-	// Pin the Visual Studio generator. Without -G, CMake may pick Ninja from PATH
-	// (e.g. MinGW), which rejects -A x64 and cannot find MSVC.
-	commandLine 'cmake', '-S', '.', '-B', 'build', '-G', 'Visual Studio 17 2022', '-A', 'x64'
-}
-
-tasks.register('buildNative', Exec) {
-	group = 'build native'
-	description = 'Builds windowscraft_native.dll (Release)'
-	dependsOn 'configureNative'
-	workingDir = nativeSourceDir
-	commandLine 'cmake', '--build', 'build', '--config', 'Release', '--parallel'
-}
-
-tasks.register('copyNativeDll', Copy) {
-	group = 'build native'
-	description = 'Copies the native DLL into the client resources'
-	dependsOn 'buildNative'
-	from file('native/build/Release/windowscraft_native.dll')
-	into nativeOutputDir.map { it.dir('natives/windows-x64') }
-}
-
-sourceSets.client.resources.srcDir(nativeOutputDir)
-
-tasks.named('processClientResources') {
-	dependsOn 'copyNativeDll'
-}
-
-// sourcesJar reads the client resources, which include the generated DLL folder.
-// Declare the dependency explicitly and keep the binary out of the sources jar.
-tasks.matching { it.name == 'sourcesJar' }.configureEach {
-	dependsOn 'copyNativeDll'
-	exclude 'natives/**'
 }
 
 tasks.withType(JavaCompile).configureEach {
