@@ -1,6 +1,7 @@
 package dev.windowscraft.client.backend;
 
 import dev.windowscraft.client.capture.NativeCapture;
+import dev.windowscraft.client.capture.Win32Input;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -12,19 +13,21 @@ import java.util.Optional;
  * Backend for a real Windows window, captured through windowscraft_native.dll.
  *
  * The texture size is the source frame scaled down so its long side is at most
- * MAX_LONG_SIDE. Blocks are small, so full-resolution frames would waste upload
- * bandwidth. A resize request overrides that size; the native side scales to match.
+ * MAX_LONG_SIDE. A resize request overrides that size; the native side scales to match.
  *
- * Clicks are forwarded to the real window with NativeCapture.click, which focuses the
- * window and sends the click at the mapped position. Motion and right/middle buttons
- * are not forwarded yet.
+ * Input is sent with PostMessageW (see Win32Input): left, right and middle buttons and
+ * pointer motion. Messages are posted to the real window, so Minecraft keeps focus.
  */
 public final class NativeWindowBackend implements WindowBackend {
-	private static final int MAX_LONG_SIDE = 640;
+	/**
+	 * Largest texture side in pixels. 1920 keeps text readable at normal in-game distances.
+	 * Higher values cost more upload bandwidth and GPU memory per window.
+	 */
+	private static final int MAX_LONG_SIDE = 1920;
 	private static final int FALLBACK_WIDTH = 640;
 	private static final int FALLBACK_HEIGHT = 360;
 	private static final int MIN_SIZE = 64;
-	private static final int MAX_SIZE = 2048;
+	private static final int MAX_SIZE = 4096;
 
 	private final String title;
 	private final long hwnd;
@@ -37,6 +40,9 @@ public final class NativeWindowBackend implements WindowBackend {
 	private int requestedHeight;
 	private boolean frameReady;
 	private boolean closed;
+
+	private int lastMotionX = -1;
+	private int lastMotionY = -1;
 
 	private NativeWindowBackend(String title, long hwnd, MemorySegment session) {
 		this.title = title;
@@ -112,21 +118,58 @@ public final class NativeWindowBackend implements WindowBackend {
 
 	@Override
 	public void pointerMotion(int x, int y) {
-		// Motion is not forwarded yet. The real window tracks the system cursor.
+		if (closed || sourceWidth <= 0) {
+			return;
+		}
+
+		int[] source = textureToSource(x, y);
+		if (source[0] == lastMotionX && source[1] == lastMotionY) {
+			return;
+		}
+		lastMotionX = source[0];
+		lastMotionY = source[1];
+		post(Win32Input.WM_MOUSEMOVE, 0, source[0], source[1]);
 	}
 
 	@Override
 	public void pointerButton(int x, int y, int button, boolean pressed) {
-		if (closed || !pressed || button != 0 || sourceWidth <= 0 || sourceHeight <= 0) {
+		if (closed || sourceWidth <= 0) {
 			return;
 		}
 
-		// Map texture pixels back to source pixels.
-		int w = width();
-		int h = height();
-		int sx = Math.max(0, Math.min(sourceWidth - 1, x * sourceWidth / w));
-		int sy = Math.max(0, Math.min(sourceHeight - 1, y * sourceHeight / h));
-		NativeCapture.click(MemorySegment.ofAddress(hwnd), sx, sy);
+		int down;
+		int up;
+		long flag;
+		switch (button) {
+			case 0 -> {
+				down = Win32Input.WM_LBUTTONDOWN;
+				up = Win32Input.WM_LBUTTONUP;
+				flag = Win32Input.MK_LBUTTON;
+			}
+			case 1 -> {
+				down = Win32Input.WM_RBUTTONDOWN;
+				up = Win32Input.WM_RBUTTONUP;
+				flag = Win32Input.MK_RBUTTON;
+			}
+			case 2 -> {
+				down = Win32Input.WM_MBUTTONDOWN;
+				up = Win32Input.WM_MBUTTONUP;
+				flag = Win32Input.MK_MBUTTON;
+			}
+			default -> {
+				return;
+			}
+		}
+
+		int[] source = textureToSource(x, y);
+		// Move first, so the target knows where the pointer is before the button event.
+		post(Win32Input.WM_MOUSEMOVE, 0, source[0], source[1]);
+		if (pressed) {
+			post(down, flag, source[0], source[1]);
+		}
+		else {
+			post(up, 0, source[0], source[1]);
+		}
 	}
 
 	@Override
@@ -147,6 +190,21 @@ public final class NativeWindowBackend implements WindowBackend {
 		}
 		closed = true;
 		NativeCapture.closeWindow(session);
+	}
+
+	/** Maps a texture pixel to a source-frame pixel. */
+	private int[] textureToSource(int x, int y) {
+		int sx = Math.max(0, Math.min(sourceWidth - 1, x * sourceWidth / width()));
+		int sy = Math.max(0, Math.min(sourceHeight - 1, y * sourceHeight / height()));
+		return new int[] {sx, sy};
+	}
+
+	private void post(int msg, long flags, int sourceX, int sourceY) {
+		int[] client = Win32Input.toClient(hwnd, sourceX, sourceY, sourceWidth, sourceHeight);
+		if (client == null) {
+			return;
+		}
+		Win32Input.post(hwnd, msg, flags, client[0], client[1]);
 	}
 
 	private static int[] fit(int srcWidth, int srcHeight) {

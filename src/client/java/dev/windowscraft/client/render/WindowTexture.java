@@ -74,6 +74,16 @@ public final class WindowTexture extends AbstractTexture {
 		textureView = RenderSystem.getDevice().createTextureView(texture);
 		sampler = RenderSystem.getSamplerCache().getSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, FilterMode.NEAREST, false);
 		pixels = ByteBuffer.allocateDirect(newWidth * newHeight * 4);
+
+		// Opaque black until the first frame arrives. A transparent texture is discarded by the
+		// cutout shader, which made new windows look missing.
+		while (pixels.hasRemaining()) {
+			pixels.put((byte) 0);
+			pixels.put((byte) 0);
+			pixels.put((byte) 0);
+			pixels.put((byte) 255);
+		}
+		upload();
 	}
 
 	private void releaseGpu() {

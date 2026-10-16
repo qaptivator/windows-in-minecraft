@@ -1,5 +1,6 @@
 package dev.windowscraft.client.render;
 
+import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.AddressMode;
@@ -38,6 +39,8 @@ public final class WindowRenderer {
 			.withFragmentShader(Identifier.fromNamespaceAndPath(WindowsCraft.MOD_ID, "core/rendertype_window"))
 			.withSampler("Sampler0")
 			.withVertexFormat(DefaultVertexFormat.POSITION_TEX, VertexFormat.Mode.QUADS)
+			// Depth test and write, so clouds and other sky geometry drawn later cannot show through the window.
+			.withDepthStencilState(DepthStencilState.DEFAULT)
 			.buildSnippet();
 
 	private static final RenderPipeline FRONT_PIPELINE = RenderPipelines.register(RenderPipeline.builder(SNIPPET)

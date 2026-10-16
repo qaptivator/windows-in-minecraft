@@ -221,6 +221,40 @@ bool CaptureSession::Poll() {
 		return false;
 	}
 
+	// Maps the staging texture that holds the previous frame and converts it to RGBA.
+	// Also used when no new frame arrived: a window that does not repaint would otherwise
+	// keep its one copied frame pending forever and never appear.
+	auto mapPending = [&m]() -> bool {
+		if (!m.hasPending) {
+			return false;
+		}
+		m.hasPending = false;
+
+		ID3D11Resource *resource = m.staging[m.readIndex].get();
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		if (FAILED(g_device.context->Map(resource, 0, D3D11_MAP_READ, 0, &mapped))) {
+			return false;
+		}
+
+		const auto *src = static_cast<const uint8_t *>(mapped.pData);
+		const size_t rowBytes = static_cast<size_t>(m.width) * 4;
+
+		for (size_t y = 0; y < m.height; ++y) {
+			const uint8_t *srcRow = src + y * mapped.RowPitch;
+			uint8_t *dstRow = m.rgba.data() + y * rowBytes;
+			// BGRA -> RGBA, opaque alpha.
+			for (size_t x = 0; x < rowBytes; x += 4) {
+				dstRow[x + 0] = srcRow[x + 2];
+				dstRow[x + 1] = srcRow[x + 1];
+				dstRow[x + 2] = srcRow[x + 0];
+				dstRow[x + 3] = 255;
+			}
+		}
+
+		g_device.context->Unmap(resource, 0);
+		return true;
+	};
+
 	try {
 		// Drain the pool and keep only the newest frame so the view never lags behind.
 		capture::Direct3D11CaptureFrame latest{nullptr};
@@ -235,7 +269,7 @@ bool CaptureSession::Poll() {
 			latest = next;
 		}
 		if (!latest) {
-			return false;
+			return mapPending();
 		}
 
 		const auto content = latest.ContentSize();
@@ -260,30 +294,7 @@ bool CaptureSession::Poll() {
 		latest.Close();
 
 		// CPU side: map the staging texture copied on the previous call.
-		bool produced = false;
-		if (m.hasPending) {
-			ID3D11Resource *resource = m.staging[m.readIndex].get();
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (SUCCEEDED(g_device.context->Map(resource, 0, D3D11_MAP_READ, 0, &mapped))) {
-				const auto *src = static_cast<const uint8_t *>(mapped.pData);
-				const size_t rowBytes = static_cast<size_t>(m.width) * 4;
-
-				for (size_t y = 0; y < m.height; ++y) {
-					const uint8_t *srcRow = src + y * mapped.RowPitch;
-					uint8_t *dstRow = m.rgba.data() + y * rowBytes;
-					// BGRA -> RGBA, opaque alpha.
-					for (size_t x = 0; x < rowBytes; x += 4) {
-						dstRow[x + 0] = srcRow[x + 2];
-						dstRow[x + 1] = srcRow[x + 1];
-						dstRow[x + 2] = srcRow[x + 0];
-						dstRow[x + 3] = 255;
-					}
-				}
-
-				g_device.context->Unmap(resource, 0);
-				produced = true;
-			}
-		}
+		bool produced = mapPending();
 
 		m.readIndex = m.writeIndex;
 		m.writeIndex ^= 1;
