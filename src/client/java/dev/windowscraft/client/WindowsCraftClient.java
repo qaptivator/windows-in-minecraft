@@ -2,6 +2,7 @@ package dev.windowscraft.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.windowscraft.WindowsCraft;
+import dev.windowscraft.client.capture.NativeCapture;
 import dev.windowscraft.client.gui.AppLauncherScreen;
 import dev.windowscraft.client.window.WindowManager;
 import net.fabricmc.api.ClientModInitializer;
@@ -34,7 +35,11 @@ public final class WindowsCraftClient implements ClientModInitializer {
 		LevelRenderEvents.END_EXTRACTION.register((context) -> WindowManager.get().refresh());
 		LevelRenderEvents.COLLECT_SUBMITS.register((context) -> WindowManager.get().submit(context));
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, minecraft) -> WindowManager.get().clear());
-		ClientLifecycleEvents.CLIENT_STOPPING.register((client) -> WindowManager.get().clear());
+		ClientLifecycleEvents.CLIENT_STOPPING.register((client) -> {
+			// Sessions close first, then the shared D3D device is released.
+			WindowManager.get().clear();
+			NativeCapture.shutdown();
+		});
 	}
 
 	private static void onClientTick(Minecraft minecraft) {

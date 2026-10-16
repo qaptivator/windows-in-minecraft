@@ -73,6 +73,7 @@ public final class WindowManager {
 	/** Runs during extraction. Refreshes sizes and uploads new frames. */
 	public void refresh() {
 		for (WindowInstance window : windows) {
+			window.backend().update();
 			window.refresh();
 			if (window.backend().renderFrame(window.texture().pixels())) {
 				window.texture().upload();

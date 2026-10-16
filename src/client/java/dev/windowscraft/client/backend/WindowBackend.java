@@ -16,6 +16,13 @@ public interface WindowBackend extends AutoCloseable {
 	/** Human-readable name, shown in the window title and logs. */
 	String title();
 
+	/**
+	 * Called once per frame during extraction, before the window reads its size.
+	 * Backends that receive frames asynchronously poll here.
+	 */
+	default void update() {
+	}
+
 	/** Current surface size in pixels. */
 	int width();
 
