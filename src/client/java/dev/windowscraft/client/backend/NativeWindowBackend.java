@@ -15,12 +15,8 @@ import java.util.Optional;
  * The texture size is the source frame scaled down so its long side is at most
  * MAX_LONG_SIDE. A resize request overrides that size; the native side scales to match.
  *
- * Input has two paths, selected by ACTIVE_CLICK:
- *
- * - Active (true): on a button press the target is brought to the foreground, the OS cursor
- *   is moved over the click point, and a SendInput click is sent. Focus and the cursor are
- *   restored on a later frame, so the render thread never blocks.
- * - Posted (false): PostMessageW only. No focus change, but many apps ignore posted input.
+ * Input is sent with PostMessageW (see Win32Input): left, right and middle buttons and
+ * pointer motion. Messages are posted to the real window, so Minecraft keeps focus.
  */
 public final class NativeWindowBackend implements WindowBackend {
 	/**
@@ -32,11 +28,6 @@ public final class NativeWindowBackend implements WindowBackend {
 	private static final int FALLBACK_HEIGHT = 360;
 	private static final int MIN_SIZE = 64;
 	private static final int MAX_SIZE = 4096;
-
-	/** true: focus and SendInput click, restored on a later frame. false: PostMessageW only. */
-	private static final boolean ACTIVE_CLICK = true;
-	/** Frames to wait after the release before restoring focus and cursor. */
-	private static final int RESTORE_DELAY_FRAMES = 1;
 
 	private final String title;
 	private final long hwnd;
@@ -52,14 +43,6 @@ public final class NativeWindowBackend implements WindowBackend {
 
 	private int lastMotionX = -1;
 	private int lastMotionY = -1;
-
-	// Active-click state. The session runs from press to release on the target.
-	private boolean sessionActive;
-	private int sessionButton;
-	private boolean restorePending;
-	private int restoreFramesLeft;
-	private long savedForeground;
-	private int[] savedCursor;
 
 	private NativeWindowBackend(String title, long hwnd, MemorySegment session) {
 		this.title = title;
@@ -89,15 +72,6 @@ public final class NativeWindowBackend implements WindowBackend {
 
 	@Override
 	public void update() {
-		if (restorePending) {
-			if (restoreFramesLeft > 0) {
-				restoreFramesLeft--;
-			}
-			else {
-				restoreFocusAndCursor();
-			}
-		}
-
 		if (closed || !NativeCapture.poll(session)) {
 			return;
 		}
@@ -154,32 +128,47 @@ public final class NativeWindowBackend implements WindowBackend {
 		}
 		lastMotionX = source[0];
 		lastMotionY = source[1];
-
-		if (ACTIVE_CLICK) {
-			// Only moves the OS cursor while a click is held, so drags keep working.
-			if (sessionActive) {
-				moveCursorTo(source);
-			}
-			return;
-		}
-
-		int[] client = Win32Input.toClient(hwnd, source[0], source[1], sourceWidth, sourceHeight);
-		if (client != null) {
-			Win32Input.postMove(hwnd, client[0], client[1]);
-		}
+		post(Win32Input.WM_MOUSEMOVE, 0, source[0], source[1]);
 	}
 
 	@Override
 	public void pointerButton(int x, int y, int button, boolean pressed) {
-		if (closed || sourceWidth <= 0 || button < 0 || button > 2) {
+		if (closed || sourceWidth <= 0) {
 			return;
 		}
 
-		if (ACTIVE_CLICK) {
-			activeButton(x, y, button, pressed);
+		int down;
+		int up;
+		long flag;
+		switch (button) {
+			case 0 -> {
+				down = Win32Input.WM_LBUTTONDOWN;
+				up = Win32Input.WM_LBUTTONUP;
+				flag = Win32Input.MK_LBUTTON;
+			}
+			case 1 -> {
+				down = Win32Input.WM_RBUTTONDOWN;
+				up = Win32Input.WM_RBUTTONUP;
+				flag = Win32Input.MK_RBUTTON;
+			}
+			case 2 -> {
+				down = Win32Input.WM_MBUTTONDOWN;
+				up = Win32Input.WM_MBUTTONUP;
+				flag = Win32Input.MK_MBUTTON;
+			}
+			default -> {
+				return;
+			}
+		}
+
+		int[] source = textureToSource(x, y);
+		// Move first, so the target knows where the pointer is before the button event.
+		post(Win32Input.WM_MOUSEMOVE, 0, source[0], source[1]);
+		if (pressed) {
+			post(down, flag, source[0], source[1]);
 		}
 		else {
-			postedButton(x, y, button, pressed);
+			post(up, 0, source[0], source[1]);
 		}
 	}
 
@@ -199,121 +188,8 @@ public final class NativeWindowBackend implements WindowBackend {
 		if (closed) {
 			return;
 		}
-		if (sessionActive) {
-			// Release the held button so the app does not see a stuck mouse.
-			Win32Input.sendMouseButton(sessionButton, false);
-			sessionActive = false;
-			restorePending = true;
-		}
-		if (restorePending) {
-			restoreFocusAndCursor();
-		}
 		closed = true;
 		NativeCapture.closeWindow(session);
-	}
-
-	private void activeButton(int x, int y, int button, boolean pressed) {
-		int[] source = textureToSource(x, y);
-		int[] client = Win32Input.toClient(hwnd, source[0], source[1], sourceWidth, sourceHeight);
-		if (client == null) {
-			return;
-		}
-		int[] screen = Win32Input.clientPointToScreen(hwnd, client[0], client[1]);
-		if (screen == null) {
-			return;
-		}
-
-		if (pressed) {
-			// Finish any restore still waiting from the previous click before taking new state.
-			if (restorePending) {
-				restoreFocusAndCursor();
-			}
-			savedForeground = Win32Input.foreground();
-			savedCursor = Win32Input.cursor();
-			if (savedForeground != hwnd) {
-				Win32Input.focus(hwnd);
-			}
-			Win32Input.setCursor(screen[0], screen[1]);
-			Win32Input.sendMouseButton(button, true);
-			sessionActive = true;
-			sessionButton = button;
-		}
-		else {
-			if (!sessionActive) {
-				return;
-			}
-			Win32Input.setCursor(screen[0], screen[1]);
-			Win32Input.sendMouseButton(button, false);
-			sessionActive = false;
-			restorePending = true;
-			restoreFramesLeft = RESTORE_DELAY_FRAMES;
-		}
-	}
-
-	private void postedButton(int x, int y, int button, boolean pressed) {
-		int down;
-		int up;
-		long flag;
-		switch (button) {
-			case 0 -> {
-				down = Win32Input.WM_LBUTTONDOWN;
-				up = Win32Input.WM_LBUTTONUP;
-				flag = Win32Input.MK_LBUTTON;
-			}
-			case 1 -> {
-				down = Win32Input.WM_RBUTTONDOWN;
-				up = Win32Input.WM_RBUTTONUP;
-				flag = Win32Input.MK_RBUTTON;
-			}
-			default -> {
-				down = Win32Input.WM_MBUTTONDOWN;
-				up = Win32Input.WM_MBUTTONUP;
-				flag = Win32Input.MK_MBUTTON;
-			}
-		}
-
-		int[] source = textureToSource(x, y);
-		int[] client = Win32Input.toClient(hwnd, source[0], source[1], sourceWidth, sourceHeight);
-		if (client == null) {
-			return;
-		}
-
-		if (pressed) {
-			Win32Input.postMove(hwnd, client[0], client[1]);
-			Win32Input.sendButton(hwnd, down, flag, client[0], client[1]);
-		}
-		else {
-			Win32Input.sendButton(hwnd, up, 0L, client[0], client[1]);
-		}
-	}
-
-	private void moveCursorTo(int[] source) {
-		int[] client = Win32Input.toClient(hwnd, source[0], source[1], sourceWidth, sourceHeight);
-		if (client == null) {
-			return;
-		}
-		int[] screen = Win32Input.clientPointToScreen(hwnd, client[0], client[1]);
-		if (screen != null) {
-			Win32Input.setCursor(screen[0], screen[1]);
-		}
-	}
-
-	/**
-	 * Gives focus back to the window that had it before the click and puts the OS cursor back.
-	 * Focus is only returned while the target still holds it, so a window the user switched
-	 * to on purpose keeps focus.
-	 */
-	private void restoreFocusAndCursor() {
-		if (savedForeground != 0 && savedForeground != hwnd && Win32Input.foreground() == hwnd) {
-			Win32Input.focus(savedForeground);
-		}
-		if (savedCursor != null) {
-			Win32Input.setCursor(savedCursor[0], savedCursor[1]);
-		}
-		restorePending = false;
-		restoreFramesLeft = 0;
-		savedForeground = 0;
-		savedCursor = null;
 	}
 
 	/** Maps a texture pixel to a source-frame pixel. */
@@ -321,6 +197,14 @@ public final class NativeWindowBackend implements WindowBackend {
 		int sx = Math.max(0, Math.min(sourceWidth - 1, x * sourceWidth / width()));
 		int sy = Math.max(0, Math.min(sourceHeight - 1, y * sourceHeight / height()));
 		return new int[] {sx, sy};
+	}
+
+	private void post(int msg, long flags, int sourceX, int sourceY) {
+		int[] client = Win32Input.toClient(hwnd, sourceX, sourceY, sourceWidth, sourceHeight);
+		if (client == null) {
+			return;
+		}
+		Win32Input.post(hwnd, msg, flags, client[0], client[1]);
 	}
 
 	private static int[] fit(int srcWidth, int srcHeight) {
