@@ -6,6 +6,7 @@
 	"description": "Mirrors Windows application windows into Minecraft.",
 	"authors": [],
 	"license": "UNLICENSED",
+	"icon": "assets/windowscraft/icon.png",
 	"environment": "client",
 	"mixins": [
 		{
