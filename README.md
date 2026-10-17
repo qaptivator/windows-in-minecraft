@@ -22,6 +22,8 @@
 
 **_HEAVILY_** inspired by [waylandcraft](https://github.com/EVV1E/waylandcraft) and [Bog's video](https://www.youtube.com/watch?v=_JyqwPXNeG4&) on that mod, this project instead targets the Windows ecosystem using native graphics capture (WGC) and DXGI pipelines via a C++ bridge.
 
+<img alt="image" src="assets/showcase_screenshot.png" />
+
 ---
 
 ## ◈ Features
@@ -33,11 +35,19 @@
 
 ---
 
+## ▽ Setup & Download
+
+Look to the side, find a section named `Releases`, and click the latest release. Then just download the latest jar file (NOT `...-sources.jar`), add it into your `mods/` folder where you have Fabric and Minecraft installed, and go right ahead!
+
+It is V to open the window spawning menu, and X to close a menu that you have open. There are also gazillion other quirks regarding how windows and input focus, and i consider that quite broken, so consider the current versions and this repo overall as a crappy "proof of concept" made in two evenings with opencode, to say the least.
+
+---
+
 ## ◇ Roadmap
 
 - [x] Basic 3D panel rendering & test canvas
 - [x] Mouse raycasting, window dragging, and resizing
-- [ ] **Native App Capture:** Streaming live Windows apps (Notepad, browser, Spotify) via JNI & WGC
+- [x] **Native App Capture:** Streaming live Windows apps (Notepad, browser, Spotify) via JNI & WGC
 - [ ] Window management (border dragging, rotation, global UI)
 - [ ] Modrinth / CurseForge releases
 
